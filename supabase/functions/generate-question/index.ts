@@ -4,45 +4,70 @@
 
 // Setup type definitions for built-in Supabase Runtime APIs
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
+import { createClient } from "jsr:@supabase/supabase-js"
+import OpenAI from "jsr:@openai/openai"
 
-const apiKey = Deno.env.get("OPEN_API_SECRET");
+const openai = new OpenAI({ apiKey: Deno.env.get("OPEN_AI_KEY") });
+const supabase_url = Deno.env.get("DB_URL");
+const supabase_anon_key = Deno.env.get("DB_ANON_KEY")
+const supabase = createClient(supabase_url, supabase_anon_key);
+
 const headers = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
   "Access-Control-Allow-Methods": "GET, OPTIONS",
 }
 
+const getPreviousQuestions = async (): Array<{ question: string }> => {
+  const questions = await supabase.from("trivia").select('question');
+  return questions.data;
+}
+
 Deno.serve(async (req) => {
-  const { method } = req;
-
-  // Only process "Options", "GET" requests...
-  switch(method) {
-    case "OPTIONS":
-      return new Response(null, { status: 204, headers });
-    case "GET":
-      break;
-    default:
-      return new Response(null, { status: 501, headers });
-  }
-
-
-  // Parse body safely
-  let name = "Anonymous"
   try {
-    const body = await req.json()
-    name = body?.name ?? "Anonymous"
-  } catch {
-    // No JSON body or invalid format
+    const { method } = req;
+
+    // Only process "Options", "GET" requests...
+    switch(method) {
+      case "OPTIONS":
+        return new Response(null, { status: 204, headers });
+      case "GET":
+        break;
+      default:
+        return new Response(null, { status: 501, headers });
+    }
+
+    const previousQuestions = await getPreviousQuestions();
+    const prompt = `
+      You are a quiz generator that always returns JSON. Return your answer in the following format: 
+        {
+          "question": string,
+          "choices": string[]
+        }
+      There should be between 3-4 choices that are plausible answers.
+      The question should NOT be one of the following questions: ${previousQuestions.map(q => q.question).join(', ')}
+    `;
+
+    const response = await openai.responses.create({
+      model: 'gpt-4.1',
+      input: prompt,
+      temperature: 0.8, // Get some variability
+    });
+
+    const responseText = JSON.parse(response.output_text);
+    console.log(response.output_text);
+
+    return new Response(JSON.stringify({ ...responseText }), {
+      headers: {
+        ...headers,
+        "Content-Type": "application/json",
+      },
+    });
+
+  } catch (error) {
+    console.log(error);
+    return new Response(null, { status: 500, headers });
   }
-
-  const data = { message: `generate-question +++ ${name} ${apiKey}!` }
-
-  return new Response(JSON.stringify(data), {
-    headers: {
-      ...headers,
-      "Content-Type": "application/json",
-    },
-  })
 });
 
 /* To invoke locally:

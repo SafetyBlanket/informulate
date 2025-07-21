@@ -4,6 +4,13 @@
 
 // Setup type definitions for built-in Supabase Runtime APIs
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
+import { createClient } from "jsr:@supabase/supabase-js"
+import OpenAI from "jsr:@openai/openai"
+
+const openai = new OpenAI({ apiKey: Deno.env.get("OPEN_AI_KEY") });
+const supabase_url = Deno.env.get("DB_URL");
+const supabase_anon_key = Deno.env.get("DB_ANON_KEY")
+const supabase = createClient(supabase_url, supabase_anon_key);
 
 const headers = {
   "Access-Control-Allow-Origin": "*",
@@ -12,31 +19,62 @@ const headers = {
 }
 
 Deno.serve(async (req) => {
-  // Handle preflight (CORS)
-  if (req.method === "OPTIONS") {
-    return new Response(null, {
-      status: 204,
-      headers,
-    });
-  }
-
-  // Parse body safely
-  let name = "Anonymous"
   try {
-    const body = await req.json()
-    name = body?.name ?? "Anonymous"
-  } catch {
-    // No JSON body or invalid format
+    const { method } = req;
+
+    // Only process "Options", "GET" requests...
+    switch(method) {
+      case "OPTIONS":
+        return new Response(null, { status: 204, headers });
+      case "POST":
+        break;
+      default:
+        return new Response(null, { status: 501, headers });
+    }
+
+    const { question, answer } = await req.json();
+
+    if (!question || !answer) {
+      return new Response(null, { status: 400, headers });
+    }
+
+    const prompt = `
+      You are a quiz judge that always returns JSON.  You are presented with a question and and answer and determine if it is correct and provide a brief explanation why.
+      You will respond in the following format:
+        {
+          "correct": boolean,
+          "explanation": string
+        }
+      The question is: "${question}".
+      The provided answer is: "${answer}.
+    `;
+
+    const response = await openai.responses.create({
+      model: 'gpt-4.1',
+      input: prompt,
+    });
+
+    const responseText = JSON.parse(response.output_text);
+    console.log(responseText);
+
+    const { data, error } = await supabase
+      .from('trivia')
+      .insert([
+        { question, answer, is_correct: responseText.correct },
+      ])
+      .select();
+    console.log('query response:', { data, error });
+
+    return new Response(JSON.stringify(responseText), {
+      headers: {
+        ...headers,
+        "Content-Type": "application/json",
+      },
+    })
+  } catch (error) {
+    console.log(error);
+    return new Response(null, { status: 500, headers });
   }
-
-  const data = { message: `submit-answer ---- ${name}!` }
-
-  return new Response(JSON.stringify(data), {
-    headers: {
-      ...headers,
-      "Content-Type": "application/json",
-    },
-  })
 })
 
 /* To invoke locally:
