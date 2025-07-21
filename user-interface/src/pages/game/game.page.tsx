@@ -78,7 +78,7 @@ const GamePage = () => {
                     </CardContent>
                     <CardActions>
                         <Box className="w-full flex flex-row-reverse gap-4">
-                            <Button variant="contained" disabled={[!answer, snackbar.open, loading].includes(true)} type="submit">Submit</Button>
+                            <Button variant="contained" loading={loading} disabled={[!answer, snackbar.open, loading].includes(true)} type="submit">Submit</Button>
                             <Button variant="outlined" onClick={loadQuestion} hidden>Generate</Button>
                         </Box>
                     </CardActions>
